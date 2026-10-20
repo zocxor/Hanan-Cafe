@@ -11,30 +11,57 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Unzip kit
+      - name: Find and unzip the kit
         shell: pwsh
         run: |
-          $zip = Get-ChildItem -Path . -Filter *.zip | Select-Object -First 1
-          Write-Host "Using $($zip.Name)"
-          Expand-Archive -Path $zip.FullName -DestinationPath kit -Force
+          $found = $false
+          foreach ($z in Get-ChildItem -Path . -Filter *.zip) {
+            Write-Host "Checking $($z.Name)"
+            $dest = "kit_" + $z.BaseName
+            Expand-Archive -Path $z.FullName -DestinationPath $dest -Force
+            $bat = Get-ChildItem -Path $dest -Recurse -Filter build_windows_exe.bat | Select-Object -First 1
+            if ($bat) {
+              Write-Host "Using $($z.Name) -> $($bat.DirectoryName)"
+              "KIT_DIR=$($bat.DirectoryName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+              $found = $true
+              break
+            }
+          }
+          if (-not $found) { Write-Error "No zip contains build_windows_exe.bat. Upload Hanan_Cafe_v0_7_0_exe_apk_kit.zip to the top level of the repo."; exit 1 }
       - name: Build exe
         shell: cmd
-        working-directory: kit/hanan-cafe-complete
+        working-directory: ${{ env.KIT_DIR }}
         run: build_windows_exe.bat
+      - name: Collect output
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path out -Force | Out-Null
+          Copy-Item "$env:KIT_DIR\dist\HananCafe-Windows.zip" out\
       - uses: actions/upload-artifact@v4
         with:
           name: HananCafe-Windows
-          path: kit/hanan-cafe-complete/dist/HananCafe-Windows.zip
+          path: out/HananCafe-Windows.zip
 
   android-apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unzip kit
+      - name: Find and unzip the kit
         run: |
-          ZIP=$(ls *.zip | head -1)
-          echo "Using $ZIP"
-          unzip -q "$ZIP" -d kit
+          found=""
+          for z in *.zip; do
+            echo "Checking $z"
+            mkdir -p "kit_$z"
+            unzip -q "$z" -d "kit_$z"
+            s=$(find "kit_$z" -path "*/android/settings.gradle" | head -1)
+            if [ -n "$s" ]; then
+              echo "ANDROID_DIR=$(dirname "$s")" >> "$GITHUB_ENV"
+              echo "Using $z"
+              found=1
+              break
+            fi
+          done
+          if [ -z "$found" ]; then echo "No zip contains the android project. Upload Hanan_Cafe_v0_7_0_exe_apk_kit.zip to the top level of the repo."; exit 1; fi
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -44,9 +71,13 @@ jobs:
         with:
           gradle-version: '8.7'
       - name: Build APK
-        working-directory: kit/hanan-cafe-complete/android
+        working-directory: ${{ env.ANDROID_DIR }}
         run: gradle assembleRelease --no-daemon
+      - name: Collect output
+        run: |
+          mkdir -p out
+          cp "$ANDROID_DIR"/app/build/outputs/apk/release/*.apk out/
       - uses: actions/upload-artifact@v4
         with:
           name: HananCafe-Android-APK
-          path: kit/hanan-cafe-complete/android/app/build/outputs/apk/release/*.apk
+          path: out/*.apk
