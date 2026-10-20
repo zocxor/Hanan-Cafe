@@ -1,0 +1,52 @@
+name: Build Hanan Cafe from zip
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Unzip kit
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path . -Filter *.zip | Select-Object -First 1
+          Write-Host "Using $($zip.Name)"
+          Expand-Archive -Path $zip.FullName -DestinationPath kit -Force
+      - name: Build exe
+        shell: cmd
+        working-directory: kit/hanan-cafe-complete
+        run: build_windows_exe.bat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HananCafe-Windows
+          path: kit/hanan-cafe-complete/dist/HananCafe-Windows.zip
+
+  android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unzip kit
+        run: |
+          ZIP=$(ls *.zip | head -1)
+          echo "Using $ZIP"
+          unzip -q "$ZIP" -d kit
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Build APK
+        working-directory: kit/hanan-cafe-complete/android
+        run: gradle assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HananCafe-Android-APK
+          path: kit/hanan-cafe-complete/android/app/build/outputs/apk/release/*.apk
